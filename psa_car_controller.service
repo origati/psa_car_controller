@@ -1,0 +1,17 @@
+[Unit]
+Description=PSA Car Controller
+After=network.target
+
+[Service]
+Type=simple
+User=origati
+WorkingDirectory=/home/origati/Develop/Domotica/psa_car_controller
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash /home/origati/Develop/Domotica/psa_car_controller/run_psacc.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
