@@ -56,7 +56,7 @@ class InitialSetup:
                                 timeout=TIMEOUT_IN_S
                                 )
             data = res.json()
-            if token := data.get("accessToken"):
+            if token := data.get("accessToken") or data.get("token"):
                 self.token = token
             else:
                 raise ConnectionError("No access token in response:", res.text)
