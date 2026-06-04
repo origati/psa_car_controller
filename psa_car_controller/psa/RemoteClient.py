@@ -87,9 +87,10 @@ class RemoteClient:
                     logger.error('mqtt error %s : %s', data["return_code"], data.get("reason", "?"))
             elif msg.topic.startswith(MQTT_EVENT_TOPIC):
                 charge_info = data["charging_state"]
-                programs = data["precond_state"].get("programs", None)
+                precond_state = data.get("precond_state")
+                programs = precond_state.get("programs", None) if precond_state else None
                 if programs:
-                    self.precond_programs[data["vin"]] = data["precond_state"]["programs"]
+                    self.precond_programs[data["vin"]] = programs
             self._fix_not_updated_api(charge_info, data["vin"])
         except KeyError:
             logger.exception("on_mqtt_message:")
