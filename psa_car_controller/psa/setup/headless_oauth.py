@@ -79,7 +79,7 @@ def check_for_error(page):
         raise FormException(f"Authentication failed: {errors}")
 
 
-def get_code(page: Page, scheme: str) -> str:
+def get_code(page: Page, scheme: str, email: str = "", password: str = "") -> str:
     """get the OAuth code in the URL or consent page."""
     code = [None]
 
@@ -88,8 +88,9 @@ def get_code(page: Page, scheme: str) -> str:
         if url.startswith(scheme + "://") and (code_found := parse_qs(urlparse(url).query).get("code", [None])[0]):
             code[0] = code_found
     page.on('request', lambda req: find_code_in_url(req.url))
-    deadline = time.time() + 30
+    deadline = time.time() + 120
     while time.time() < deadline:
+        _fill_credentials(page, email, password)
         for selector in AUTHORIZE_SELECTORS:
             if page.is_visible(selector):
                 logger.info("Clicking authorization consent: %s", selector)
@@ -136,7 +137,7 @@ def get_oauth_code_headless(auth_url: str, email: str, password: str,
             page.on("console", on_console)
             page.goto(auth_url, wait_until="networkidle", timeout=TIMEOUT_MS)
             _fill_credentials(page, email, password)
-            return get_code(page, scheme)
+            return get_code(page, scheme, email, password)
         except (playwright_sync.TimeoutError, RuntimeError) as e:
             logger.exception("Headless OAuth failed: %s", e)
             check_for_error(page)
