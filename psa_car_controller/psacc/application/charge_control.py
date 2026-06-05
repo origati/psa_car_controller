@@ -4,7 +4,6 @@ import threading
 from copy import copy
 from datetime import datetime, timedelta
 from hashlib import md5
-from time import sleep
 
 import pytz
 
@@ -42,18 +41,22 @@ class ChargeControl:
     def control_charge_with_ack(self, charge: bool):
         self.psacc.remote_client.charge_now(self.vin, charge)
         self.retry_count += 1
-        sleep(ChargeControl.MQTT_TIMEOUT)
-        vehicle_status = self.psacc.get_vehicle_info(self.vin)
-        status = vehicle_status.get_energy('Electric').charging.status
-        if status in (FINISHED, DISCONNECTED):
-            logger.warning("Car state isn't compatible with charging %s", status)
-        if (status == INPROGRESS) != charge:
-            logger.warning("retry to control the charge of %s", self.vin)
-            self.psacc.remote_client.charge_now(self.vin, charge)
-            self.retry_count += 1
-            return False
-        self.retry_count = 0
-        return True
+        threading.Timer(ChargeControl.MQTT_TIMEOUT, self._verify_charge, args=[charge]).start()
+
+    def _verify_charge(self, charge: bool):
+        try:
+            vehicle_status = self.psacc.get_vehicle_info(self.vin)
+            status = vehicle_status.get_energy('Electric').charging.status
+            if status in (FINISHED, DISCONNECTED):
+                logger.warning("Car state isn't compatible with charging %s", status)
+            if (status == INPROGRESS) != charge:
+                logger.warning("retry to control the charge of %s", self.vin)
+                self.psacc.remote_client.charge_now(self.vin, charge)
+                self.retry_count += 1
+            else:
+                self.retry_count = 0
+        except (AttributeError, ValueError):
+            logger.exception("_verify_charge: can't retrieve charging status")
 
     def force_update(self, vehicle_status):
         charging_mode = vehicle_status.get_energy('Electric').charging.charging_mode
@@ -68,8 +71,8 @@ class ChargeControl:
         if (datetime.utcnow().replace(tzinfo=pytz.UTC) - last_update).total_seconds() > 60 * wakeup_timeout:
             try:
                 self.psacc.remote_client.wakeup(self.vin)
-            except RateLimitException:
-                logger.exception("force_update:")
+            except RateLimitException as e:
+                logger.warning("force_update: %s", e)
 
     def __is_approaching_scheduled_time(self, now: datetime):
         scheduled_hour, scheduled_minute = self.psacc.remote_client.get_charge_hour(self.vin)
@@ -114,7 +117,7 @@ class ChargeControl:
                 self.retry_count = 0
         except (AttributeError, ValueError):
             logger.exception("Probably can't retrieve all information from API:")
-        except BaseException:
+        except Exception:
             logger.exception("Charge control:")
 
     def get_dict(self):

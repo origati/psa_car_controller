@@ -130,4 +130,4 @@ class OauthAPIClient(ApiClient):
                     self.configuration.refresh_callback()
                 else:
                     raise e
-        return None
+        raise ApiException(status=503, reason="API call failed after retries")

@@ -54,6 +54,7 @@ class PSACarController(metaclass=Singleton):
         self.offline = self.args.offline
         self.remote_control = not (self.args.remote_disable or self.offline)
         self.config = ConfigRepository.read_config()
+        self._save_timer: threading.Timer = None
 
     def start_remote_control(self):
         if self.args.remote_disable:
@@ -120,5 +121,8 @@ class PSACarController(metaclass=Singleton):
         return True
 
     def save_config(self):
-        threading.Timer(30, self.save_config).start()
+        if self._save_timer is None or not self._save_timer.is_alive():
+            self._save_timer = threading.Timer(30, self.save_config)
+            self._save_timer.daemon = True
+            self._save_timer.start()
         self.myp.save_config(self.config_name)

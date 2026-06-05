@@ -71,9 +71,17 @@ def charge_now(vin, charge):
 
 @app.route('/charge_hour')
 def change_charge_hour():
-    return jsonify(APP.myp.remote_client.change_charge_hour(request.args['vin'],
-                                                            request.args['hour'],
-                                                            request.args['minute']))
+    vin = request.args.get('vin')
+    if not vin:
+        return jsonify({"error": "missing vin"}), 400
+    try:
+        hour = int(request.args['hour'])
+        minute = int(request.args['minute'])
+    except (KeyError, ValueError):
+        return jsonify({"error": "hour and minute are required integers"}), 400
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return jsonify({"error": "hour must be 0-23 and minute 0-59"}), 400
+    return jsonify(APP.myp.remote_client.change_charge_hour(vin, hour, minute))
 
 
 @app.route('/wakeup/<string:vin>')

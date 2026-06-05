@@ -48,6 +48,7 @@ class RemoteClient:
         self.otp = None
         self._lock = threading.Lock()
         self.update_thread: threading.Timer = None
+        self._wakeup_timers: dict = {}
 
     def __on_mqtt_connect(self, client, userdata, result_code, _):  # pylint: disable=unused-argument
         logger.info("Connected with result code %s", result_code)
@@ -60,9 +61,8 @@ class RemoteClient:
 
     def _on_mqtt_disconnect(self, client, userdata, result_code):  # pylint: disable=unused-argument
         logger.warning("Disconnected with result code %d", result_code)
-        if result_code == 1:
+        if result_code != 0:
             self._refresh_remote_token(force=True)
-        else:
             logger.warning(mqtt.error_string(result_code))
 
     def _on_mqtt_message(self, client, userdata, msg):  # pylint: disable=unused-argument
@@ -106,7 +106,13 @@ class RemoteClient:
                 if car and car.status.get_energy('Electric').charging.status != INPROGRESS:
                     # fix a psa server bug where charge beginning without status api being properly updated
                     logger.warning("charge begin but API isn't updated")
-                    threading.Timer(60, self.wakeup, args=[vin]).start()
+                    existing = self._wakeup_timers.get(vin)
+                    if existing and existing.is_alive():
+                        existing.cancel()
+                    t = threading.Timer(60, self.wakeup, args=[vin])
+                    t.daemon = True
+                    self._wakeup_timers[vin] = t
+                    t.start()
             except RateLimitException as e:
                 logger.warning("on_mqtt_message: %s", e)
             except (IndexError, AttributeError):
@@ -139,7 +145,7 @@ class RemoteClient:
             self.update_thread.join(timeout=TIMEOUT_IN_S)
 
     def __keep_mqtt(self):  # avoid token expiration
-        timeout = 3600 * 24  # 1 day
+        timeout = MQTT_TOKEN_TTL - 60
         if len(self.vehicles_list) > 0:
             try:
                 self.wakeup(self.vehicles_list[0].vin)
