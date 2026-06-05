@@ -3,7 +3,6 @@ import logging
 import threading
 from datetime import datetime
 from os import environ
-import time
 
 import paho.mqtt.client as mqtt
 from requests import RequestException
@@ -107,9 +106,10 @@ class RemoteClient:
                 if car and car.status.get_energy('Electric').charging.status != INPROGRESS:
                     # fix a psa server bug where charge beginning without status api being properly updated
                     logger.warning("charge begin but API isn't updated")
-                    time.sleep(60)
-                    self.wakeup(vin)
-            except (IndexError, AttributeError, RateLimitException):
+                    threading.Timer(60, self.wakeup, args=[vin]).start()
+            except RateLimitException as e:
+                logger.warning("on_mqtt_message: %s", e)
+            except (IndexError, AttributeError):
                 logger.exception("on_mqtt_message:")
 
     def start(self):
