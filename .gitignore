@@ -154,4 +154,6 @@ certs/
 .vscode/ 
 
 myopel.apk.bz2
+info.db*
+
 
