@@ -62,8 +62,9 @@ class RemoteClient:
     def _on_mqtt_disconnect(self, client, userdata, result_code):  # pylint: disable=unused-argument
         logger.warning("Disconnected with result code %d", result_code)
         if result_code != 0:
-            self._refresh_remote_token(force=True)
             logger.warning(mqtt.error_string(result_code))
+        if result_code in (1, 4, 5):  # CONNACK failures: auth rejected by broker
+            self._refresh_remote_token(force=True)
 
     def _on_mqtt_message(self, client, userdata, msg):  # pylint: disable=unused-argument
         try:
