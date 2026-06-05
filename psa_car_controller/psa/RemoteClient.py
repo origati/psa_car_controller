@@ -91,9 +91,29 @@ class RemoteClient:
                 programs = precond_state.get("programs", None) if precond_state else None
                 if programs:
                     self.precond_programs[data["vin"]] = programs
+                self._update_car_status_from_mqtt(data["vin"], charge_info)
             self._fix_not_updated_api(charge_info, data["vin"])
         except KeyError:
             logger.exception("on_mqtt_message:")
+
+    def _update_car_status_from_mqtt(self, vin, charge_info):
+        if not charge_info:
+            return
+        try:
+            car = self.vehicles_list.get_car_by_vin(vin=vin)
+            if car is None or car.status is None:
+                return
+            electric = car.status.get_energy('Electric')
+            if electric is None:
+                return
+            soc = charge_info.get('soc_batt')
+            autonomy = charge_info.get('autonomy_zev')
+            if soc is not None:
+                electric.level = soc
+            if autonomy is not None:
+                electric.autonomy = autonomy
+        except (AttributeError, IndexError):
+            pass
 
     def _fix_not_updated_api(self, charge_info, vin):
         # PSA uses 0xFFE (4094) as sentinel meaning "remaining time unknown/not applicable".
@@ -146,7 +166,7 @@ class RemoteClient:
             self.update_thread.join(timeout=TIMEOUT_IN_S)
 
     def __keep_mqtt(self):  # avoid token expiration
-        timeout = MQTT_TOKEN_TTL - 60
+        timeout = 3600 * 24  # 1 day
         if len(self.vehicles_list) > 0:
             try:
                 self.wakeup(self.vehicles_list[0].vin)
