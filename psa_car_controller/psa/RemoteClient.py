@@ -50,7 +50,7 @@ class RemoteClient:
         self.update_thread: threading.Timer = None
         self._wakeup_timers: dict = {}
 
-    def __on_mqtt_connect(self, client, userdata, result_code, _):  # pylint: disable=unused-argument
+    def __on_mqtt_connect(self, client, userdata, _flags, result_code):  # pylint: disable=unused-argument
         logger.info("Connected with result code %s", result_code)
         topics = [MQTT_RESP_TOPIC + self.account_info.get_mqtt_customer_id() + "/#"]
         for car in self.vehicles_list:
@@ -63,8 +63,8 @@ class RemoteClient:
         logger.warning("Disconnected with result code %d", result_code)
         if result_code != 0:
             logger.warning(mqtt.error_string(result_code))
-        if result_code in (1, 4, 5):  # CONNACK failures: auth rejected by broker
-            self._refresh_remote_token(force=True)
+        if result_code in (1, 4, 5):  # CONNACK auth failures: refresh once per TTL window
+            self._refresh_remote_token()
 
     def _on_mqtt_message(self, client, userdata, msg):  # pylint: disable=unused-argument
         try:
