@@ -96,7 +96,12 @@ class RemoteClient:
             logger.exception("on_mqtt_message:")
 
     def _fix_not_updated_api(self, charge_info, vin):
-        if charge_info is not None and (charge_info.get('remaining_time', 0) != 0 or charge_info.get('rate', 0) != 0):
+        # PSA uses 0xFFE (4094) as sentinel meaning "remaining time unknown/not applicable".
+        # Treating it as a real value triggers a wakeup loop when cable is connected but not charging.
+        REMAINING_TIME_UNKNOWN = 0xFFE
+        remaining = charge_info.get('remaining_time', 0) if charge_info else 0
+        rate = charge_info.get('rate', 0) if charge_info else 0
+        if charge_info is not None and (rate != 0 or (remaining != 0 and remaining != REMAINING_TIME_UNKNOWN)):
             try:
                 car = self.vehicles_list.get_car_by_vin(vin=vin)
                 if car and car.status.get_energy('Electric').charging.status != INPROGRESS:
