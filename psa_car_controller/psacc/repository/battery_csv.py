@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 CSV_FILE = "battery_readings.csv"
 _HEADER = ["timestamp", "vin", "source", "level", "level_bms", "autonomy"]
-_last = {}  # (vin, source) -> (level, level_bms, autonomy)
+_last = {}     # (vin, source) -> (level, level_bms, autonomy)
+_last_ts = {}  # (vin, source) -> datetime
 
 
 def record(vin, source, level=None, level_bms=None, autonomy=None, timestamp=None):
@@ -15,6 +16,7 @@ def record(vin, source, level=None, level_bms=None, autonomy=None, timestamp=Non
     _last[key] = new_vals
     if timestamp is None:
         timestamp = datetime.now(timezone.utc)
+    _last_ts[key] = timestamp
     write_header = not os.path.exists(CSV_FILE)
     with open(CSV_FILE, "a", newline="") as f:
         w = csv.writer(f)
@@ -28,3 +30,21 @@ def record(vin, source, level=None, level_bms=None, autonomy=None, timestamp=Non
             level_bms if level_bms is not None else "",
             autonomy if autonomy is not None else "",
         ])
+
+
+def get_last(vin):
+    """Returns the last known api and mqtt readings for a VIN, with timestamps."""
+    result = {}
+    for source in ("api", "mqtt"):
+        key = (vin, source)
+        if key not in _last:
+            continue
+        vals = _last[key]
+        ts = _last_ts.get(key)
+        entry = {"autonomy": vals[2], "ts": ts.isoformat() if ts else None}
+        if source == "api":
+            entry["level"] = vals[0]
+        else:
+            entry["level_bms"] = vals[1]
+        result[source] = entry
+    return result

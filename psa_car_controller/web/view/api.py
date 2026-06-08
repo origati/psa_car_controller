@@ -12,6 +12,7 @@ from psa_car_controller.psacc.model.car import Cars
 from psa_car_controller.psacc.repository.trips import Trips
 
 from psa_car_controller.psacc.application.charging import Charging
+from psa_car_controller.psacc.repository.battery_csv import get_last as get_last_battery
 
 import json
 
@@ -227,3 +228,8 @@ def settings():
 def db(vin: str):
     soh = Database.get_last_soh_by_vin(vin)
     return jsonify({"soh": soh})
+
+
+@app.route('/battery/last/<string:vin>')
+def battery_last(vin: str):
+    return jsonify(get_last_battery(vin))
