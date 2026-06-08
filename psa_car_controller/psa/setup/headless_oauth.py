@@ -94,7 +94,7 @@ def get_code(page: Page, scheme: str, email: str = "", password: str = "") -> st
         for selector in AUTHORIZE_SELECTORS:
             if page.is_visible(selector):
                 logger.info("Clicking authorization consent: %s", selector)
-                page.click(selector)
+                page.click(selector, force=True)
                 break
             time.sleep(1)
             if code[0]:
