@@ -126,7 +126,10 @@ class PSAClient:
             try:
                 logger.debug("refresh_vehicle_info")
                 for car in self.vehicles_list:
-                    self.get_vehicle_info(car.vin)
+                    res = self.get_vehicle_info(car.vin)
+                    if res is None:
+                        logger.info("refresh_vehicle_info: API failed, requesting wakeup for %s", car.vin)
+                        self.remote_client.wakeup(car.vin)
                 for callback in self.info_callback:
                     callback()
             except BaseException:
