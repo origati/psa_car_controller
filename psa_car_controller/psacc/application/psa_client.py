@@ -21,6 +21,7 @@ from psa_car_controller.psa.constants import realm_info, AUTHORIZE_SERVICE
 
 from .abrp import Abrp
 from psa_car_controller.psacc.repository.db import Database
+from psa_car_controller.psacc.repository.battery_csv import record as record_battery_csv
 from psa_car_controller.common.mylogger import CustomLogger
 
 SCOPE = ['openid profile']
@@ -229,6 +230,9 @@ class PSAClient:
                 logger.debug("SOH already recorded")
             except AttributeError as ex:
                 logger.debug("Failed to record SOH: %s", ex)
+            record_battery_csv(car.vin, "api", level=level,
+                               autonomy=electric_energy_status.autonomy,
+                               timestamp=charge_date)
 
     def __iter__(self):
         for key, value in self.__dict__.items():

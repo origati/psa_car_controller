@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 from requests import RequestException
 
 from psa_car_controller.psacc.model.car import Cars
+from psa_car_controller.psacc.repository.battery_csv import record as record_battery_csv
 from psa_car_controller.psa.AccountInformation import AccountInformation
 from psa_car_controller.psa.RemoteCredentials import RemoteCredentials
 from psa_car_controller.psa.constants import INPROGRESS, DEFAULT_PRECONDITIONING_PROGRAM, IMMEDIATE_CHARGE, \
@@ -106,12 +107,23 @@ class RemoteClient:
             electric = car.status.get_energy('Electric')
             if electric is None:
                 return
-            soc = charge_info.get('soc_batt')
+            soc_batt = charge_info.get('soc_batt')
             autonomy = charge_info.get('autonomy_zev')
-            if soc is not None:
-                electric.level = soc
+            # Log comparison between MQTT raw values and current REST API values
+            # soc_batt is BMS gross capacity %; electric.level is user-display % (different scale)
+            logger.info(
+                "MQTT vs API comparison for %s: mqtt.soc_batt=%s api.level=%s mqtt.autonomy_zev=%s api.autonomy=%s"
+                " mqtt.rate=%s mqtt.remaining_time=%s mqtt.plugged=%s",
+                vin, soc_batt, electric.level, autonomy, electric.autonomy,
+                charge_info.get('rate'), charge_info.get('remaining_time'), charge_info.get('cable_detected')
+            )
+            # soc_batt from MQTT is BMS raw SOC (% of gross capacity).
+            # The REST API level is user-display SOC (% of usable capacity) — a different scale.
+            # autonomy_zev in km matches between both sources, so we keep updating it.
+            # We do NOT overwrite electric.level with soc_batt to avoid showing wrong values on the dashboard.
             if autonomy is not None:
                 electric.autonomy = autonomy
+            record_battery_csv(vin, "mqtt", level_bms=soc_batt, autonomy=autonomy)
         except (AttributeError, IndexError):
             pass
 
