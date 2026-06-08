@@ -72,6 +72,7 @@ class PSAClient:
         self.config_file = DEFAULT_CONFIG_FILENAME
         Ecomix.co2_signal_key = co2_signal_api
         self.refresh_thread: threading.Timer = None
+        self.manager.refresh_callbacks.append(self.save_config)
         remote_credentials = RemoteCredentials(remote_refresh_token)
         remote_credentials.update_callbacks.append(self.save_config)
         self.remote_client = RemoteClient(self.account_info,
