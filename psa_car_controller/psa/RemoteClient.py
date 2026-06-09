@@ -117,13 +117,16 @@ class RemoteClient:
                 vin, soc_batt, electric.level, autonomy, electric.autonomy,
                 charge_info.get('rate'), charge_info.get('remaining_time'), charge_info.get('cable_detected')
             )
-            # soc_batt from MQTT is BMS raw SOC (% of gross capacity).
-            # The REST API level is user-display SOC (% of usable capacity) — a different scale.
-            # autonomy_zev in km matches between both sources, so we keep updating it.
-            # We do NOT overwrite electric.level with soc_batt to avoid showing wrong values on the dashboard.
+            # autonomy_zev in km matches between API and MQTT, so we always update it.
+            # We do NOT overwrite electric.level with soc_batt: scales differ and MQTT can send
+            # garbage values at wakeup (e.g. 100→25→50 within milliseconds).
             if autonomy is not None:
                 electric.autonomy = autonomy
             record_battery_csv(vin, "mqtt", level_bms=soc_batt, autonomy=autonomy)
+            # If MQTT reports active charging, update status immediately without waiting for REST API.
+            rate = charge_info.get('rate')
+            if rate is not None and rate > 0 and electric.charging is not None:
+                electric.charging.status = "InProgress"
         except (AttributeError, IndexError):
             pass
 
