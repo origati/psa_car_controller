@@ -123,20 +123,22 @@ class RemoteClient:
             if autonomy is not None:
                 electric.autonomy = autonomy
             record_battery_csv(vin, "mqtt", level_bms=soc_batt, autonomy=autonomy)
-            # If MQTT reports active charging, update status immediately without waiting for REST API.
+            # Actualitzam l'estat de càrrega en memòria basant-nos en el rate MQTT (fiable).
+            # rate > 0  → InProgress immediatament, sense esperar la REST API.
+            # rate = 0  → si teníem InProgress, posam Stopped perquè _sync_from_api de
+            #             domotica detecti el canvi en ≤60s sense esperar el refresc REST (4h).
             rate = charge_info.get('rate')
-            if rate is not None and rate > 0 and electric.charging is not None:
-                electric.charging.status = "InProgress"
+            if rate is not None and electric.charging is not None:
+                if rate > 0:
+                    electric.charging.status = "InProgress"
+                elif electric.charging.status == "InProgress":
+                    electric.charging.status = "Stopped"
         except (AttributeError, IndexError):
             pass
 
     def _fix_not_updated_api(self, charge_info, vin):
-        # PSA uses 0xFFE (4094) as sentinel meaning "remaining time unknown/not applicable".
-        # Treating it as a real value triggers a wakeup loop when cable is connected but not charging.
-        REMAINING_TIME_UNKNOWN = 0xFFE
-        remaining = charge_info.get('remaining_time', 0) if charge_info else 0
         rate = charge_info.get('rate', 0) if charge_info else 0
-        if charge_info is not None and (rate != 0 or (remaining != 0 and remaining != REMAINING_TIME_UNKNOWN)):
+        if charge_info is not None and rate != 0:
             try:
                 car = self.vehicles_list.get_car_by_vin(vin=vin)
                 if car and car.status.get_energy('Electric').charging.status != INPROGRESS:
