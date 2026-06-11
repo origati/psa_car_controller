@@ -33,20 +33,29 @@ message_without_charge_info = b'{"date":"2022-03-30T13:18:56Z","etat_res_elec":5
 
 class TestUnit(unittest.TestCase):
 
-    @patch('time.sleep', return_value=None)
-    def test_fix_not_updated_api(self, patched_time_sleep):
+    @patch('psa_car_controller.psa.RemoteClient.record_battery_csv')
+    def test_update_car_status_from_mqtt(self, _patched_record):
         # GIVEN
         remote_client = get_rc()
         vin = "myvin"
         car = Car("a", "b", "c")
         car.status = ApiClient()._ApiClient__deserialize(ELECTRIC_CAR_STATUS, "Status")
-        car.status.get_energy('Electric').charging.status = DISCONNECTED
+        electric = car.status.get_energy('Electric')
+        electric.charging.status = DISCONNECTED
+        electric.charging.plugged = False
         remote_client.vehicles_list.get_car_by_vin = MagicMock(return_value=car)
-        remote_client.wakeup = MagicMock()
-        # WHEN
-        remote_client._fix_not_updated_api({'remaining_time': 1}, vin)
-        # THEN
-        remote_client.wakeup.assert_called_once_with(vin)
+        # WHEN rate > 0 i cable connectat
+        remote_client._update_car_status_from_mqtt(
+            vin, {'rate': 20, 'cable_detected': 1, 'autonomy_zev': 150})
+        # THEN estat, plugged i autonomia actualitzats a l'instant
+        self.assertEqual(electric.charging.status, "InProgress")
+        self.assertTrue(electric.charging.plugged)
+        self.assertEqual(electric.autonomy, 150)
+        # WHEN rate = 0 després d'estar carregant
+        remote_client._update_car_status_from_mqtt(vin, {'rate': 0, 'cable_detected': 0})
+        # THEN detecta el final de la càrrega
+        self.assertEqual(electric.charging.status, "Stopped")
+        self.assertFalse(electric.charging.plugged)
 
     def test_message_without_precond(self):
         remote_client = get_rc()

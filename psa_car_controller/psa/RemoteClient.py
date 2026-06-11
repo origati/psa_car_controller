@@ -11,7 +11,7 @@ from psa_car_controller.psacc.model.car import Cars
 from psa_car_controller.psacc.repository.battery_csv import record as record_battery_csv
 from psa_car_controller.psa.AccountInformation import AccountInformation
 from psa_car_controller.psa.RemoteCredentials import RemoteCredentials
-from psa_car_controller.psa.constants import INPROGRESS, DEFAULT_PRECONDITIONING_PROGRAM, IMMEDIATE_CHARGE, \
+from psa_car_controller.psa.constants import DEFAULT_PRECONDITIONING_PROGRAM, IMMEDIATE_CHARGE, \
     DELAYED_CHARGE, REMOTE_URL
 from psa_car_controller.psa.mqtt_request import MQTTRequest
 from psa_car_controller.psa.oauth import OpenIdCredentialManager
@@ -49,7 +49,6 @@ class RemoteClient:
         self.otp = None
         self._lock = threading.Lock()
         self.update_thread: threading.Timer = None
-        self._wakeup_timers: dict = {}
 
     def __on_mqtt_connect(self, client, userdata, _flags, result_code):  # pylint: disable=unused-argument
         logger.info("Connected with result code %s", result_code)
@@ -108,7 +107,6 @@ class RemoteClient:
                 if programs:
                     self.precond_programs[data["vin"]] = programs
                 self._update_car_status_from_mqtt(data["vin"], charge_info)
-            self._fix_not_updated_api(charge_info, data["vin"])
         except KeyError:
             logger.exception("on_mqtt_message:")
 
@@ -154,26 +152,6 @@ class RemoteClient:
                 electric.charging.plugged = bool(cable)
         except (AttributeError, IndexError):
             pass
-
-    def _fix_not_updated_api(self, charge_info, vin):
-        rate = charge_info.get('rate', 0) if charge_info else 0
-        if charge_info is not None and rate != 0:
-            try:
-                car = self.vehicles_list.get_car_by_vin(vin=vin)
-                if car and car.status.get_energy('Electric').charging.status != INPROGRESS:
-                    # fix a psa server bug where charge beginning without status api being properly updated
-                    logger.warning("charge begin but API isn't updated")
-                    existing = self._wakeup_timers.get(vin)
-                    if existing and existing.is_alive():
-                        existing.cancel()
-                    t = threading.Timer(60, self.wakeup, args=[vin])
-                    t.daemon = True
-                    self._wakeup_timers[vin] = t
-                    t.start()
-            except RateLimitException as e:
-                logger.warning("on_mqtt_message: %s", e)
-            except (IndexError, AttributeError):
-                logger.exception("on_mqtt_message:")
 
     def start(self):
         if self.load_otp():
