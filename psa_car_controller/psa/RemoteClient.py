@@ -59,6 +59,21 @@ class RemoteClient:
         for topic in topics:
             client.subscribe(topic)
             logger.info("subscribe to %s", topic)
+        # Demanam l'estat al cotxe ara que la connexió és real: el wakeup de
+        # __keep_mqtt es publica abans del CONNACK i paho el descarta (QoS 0).
+        # Timer per no bloquejar el thread de xarxa de paho amb el refresh del token.
+        t = threading.Timer(2, self._wakeup_all_cars)
+        t.daemon = True
+        t.start()
+
+    def _wakeup_all_cars(self):
+        for car in self.vehicles_list:
+            try:
+                self.wakeup(car.vin)
+            except RateLimitException as e:
+                logger.warning("_wakeup_all_cars: %s", e)
+            except Exception:
+                logger.exception("_wakeup_all_cars:")
 
     def _on_mqtt_disconnect(self, client, userdata, result_code):  # pylint: disable=unused-argument
         logger.warning("Disconnected with result code %d", result_code)
@@ -133,6 +148,10 @@ class RemoteClient:
                     electric.charging.status = "InProgress"
                 elif electric.charging.status == "InProgress":
                     electric.charging.status = "Stopped"
+            # cable_detected MQTT també és fiable → actualitzam plugged a l'instant.
+            cable = charge_info.get('cable_detected')
+            if cable is not None and electric.charging is not None:
+                electric.charging.plugged = bool(cable)
         except (AttributeError, IndexError):
             pass
 
