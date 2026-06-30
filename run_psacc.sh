@@ -6,4 +6,4 @@ if [ -f ".venv/bin/activate" ]; then
   source ".venv/bin/activate"
 fi
 
-python3 -u -m psa_car_controller -r -R 240
+python3 -u -m psa_car_controller -r
