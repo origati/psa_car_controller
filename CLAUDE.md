@@ -16,7 +16,7 @@
 - Script d'arrencada: `run_psacc.sh` → `python3 -u -m psa_car_controller -r -R 240`
   - `-r` = guarda dades a BD
   - `-R 240` = refresc automàtic cada 4h (recomanació upstream: mínim 60 min per evitar `RateLimitException`)
-- Servidor local: `http://127.0.0.1:5001`
+- Servidor: escolta només a `127.0.0.1:5000` dins la Pi (no exposat a la xarxa). Per accedir-hi de fora: `ssh -f -N -L 5001:127.0.0.1:5000 origati@100.119.150.78` i obrir `http://127.0.0.1:5001` al navegador local.
 
 ## Arquitectura de cache (dos nivells)
 
@@ -40,6 +40,21 @@ Quan psacc es (re)connecta a MQTT, dispara `_wakeup_all_cars` amb un `Timer(2s)`
 ### Timing del wakeup
 
 El cotxe tarda **~25-30 segons** a respondre a un wakeup quan dorm. PSA pot retornar `process_code 901` (vehicle asleep) com a estat intermedi — no és un error final, el cotxe acaba responent.
+
+## Reautenticació OAuth (`invalid_grant`)
+
+Si els logs (`journalctl -u psa_car_controller.service`) mostren `oauth2_client.credentials_manager.OAuthError: 400 - invalid_grant : grant is invalid` de forma repetida (cada ~10 min, a `refresh_token_now` a `oauth.py:79`), el `refresh_token` guardat a `config.json` ha quedat invalidat per PSA/Stellantis (caducitat o revocació al seu costat, no és un bug del codi). Cal refer el login manual:
+
+**Causa habitual — sessió única per compte**: Stellantis només permet un `refresh_token`/sessió activa alhora per compte. L'app oficial (MyOpel) s'obre automàticament al fer servir el cotxe (pantalla/infotainment en arrencar), i això revoca la sessió de psacc encara que s'acabi de renovar (vist: renovat i invalidat als 16 min). No hi ha manera d'evitar-ho des del codi de psacc — cal esperar-ho i refer login quan calgui, o evitar obrir/usar l'app oficial mentre psacc necessiti la sessió activa.
+
+1. Obrir `http://<ip-pi>:5001/config` (pestanya "User config"), omplir marca/email/contrasenya i "Submit".
+2. Si l'auto-login falla (`HeadlessOAuthError`), apareix un enllaç "Go to login" → `/config_connect?url=<auth_url>`.
+3. A `/config_connect`: clic a "1. Click here" → login PSA/AWS Cognito fins "LOGIN SUCCESSFUL".
+4. Abans de prémer el botó final "OK", obrir DevTools → Network.
+5. Clicar "OK"; a Network buscar la petició `mystellantis://oauth2redirect/...` i copiar el paràmetre `code=` (36 caràcters).
+6. Enganxar el codi al camp "Code" de `/config_connect` i "Submit" → crida `finish_oauth` → `connect_with_code` → desa el nou `refresh_token`/`remote_refresh_token` a `config.json`.
+
+Rutes implicades: `web/view/views.py`, `web/view/config_views.py`, `web/view/config_oauth.py`, `psa/setup/app_decoder.py` (`InitialSetup.connect`), `psa/oauth.py`.
 
 ## Bugs corregits
 

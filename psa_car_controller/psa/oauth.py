@@ -10,6 +10,7 @@ from typing import Optional
 from oauth2_client.credentials_manager import CredentialManager, ServiceInformation
 from requests import Response, RequestException
 
+from psa_car_controller.common import health
 from psa_car_controller.common.utils import rate_limit, TIMEOUT_IN_S
 from psa_car_controller.psa import connected_car_api
 from psa_car_controller.psa.connected_car_api import ApiClient
@@ -79,9 +80,14 @@ class OpenIdCredentialManager(CredentialManager):
             self._refresh_token()
             for refresh_callback in self.refresh_callbacks:
                 refresh_callback()
+            health.mark_oauth_ok()
             return True
         except RequestException as e:
             logger.error("Can't refresh token %s", e)
+            health.mark_oauth_error(str(e))
+        except Exception as e:
+            health.mark_oauth_error(str(e))
+            raise
         return False
 
     def request(self, method, url, **kwargs):  # pylint: disable=W0221

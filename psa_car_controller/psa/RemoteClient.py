@@ -15,6 +15,7 @@ from psa_car_controller.psa.constants import DEFAULT_PRECONDITIONING_PROGRAM, IM
     DELAYED_CHARGE, REMOTE_URL
 from psa_car_controller.psa.mqtt_request import MQTTRequest
 from psa_car_controller.psa.oauth import OpenIdCredentialManager
+from psa_car_controller.common import health
 from psa_car_controller.common.utils import RateLimitException, rate_limit, parse_hour, TIMEOUT_IN_S
 from psa_car_controller.psa.otp.otp import ConfigException, save_otp, load_otp
 
@@ -52,6 +53,7 @@ class RemoteClient:
 
     def __on_mqtt_connect(self, client, userdata, _flags, result_code):  # pylint: disable=unused-argument
         logger.info("Connected with result code %s", result_code)
+        health.mark_mqtt_connect(result_code)
         if result_code != 0:
             return
         topics = [MQTT_RESP_TOPIC + self.account_info.get_mqtt_customer_id() + "/#"]
@@ -78,6 +80,7 @@ class RemoteClient:
 
     def _on_mqtt_disconnect(self, client, userdata, result_code):  # pylint: disable=unused-argument
         logger.warning("Disconnected with result code %d", result_code)
+        health.mark_mqtt_disconnect(result_code)
         if result_code != 0:
             logger.warning(mqtt.error_string(result_code))
         if result_code in (1, 4, 5):  # MQTT_ERR_NOMEM / MQTT_ERR_NO_CONN / MQTT_ERR_CONN_REFUSED
@@ -241,12 +244,15 @@ class RemoteClient:
                     self._get_remote_access_token(otp_code)
                 self.remote_token_last_update = datetime.now()
                 self.mqtt_client.username_pw_set("IMA_OAUTH_ACCESS_TOKEN", self.remoteCredentials.access_token)
+                health.mark_remote_token_ok()
                 return True
             except RateLimitException as e:
                 logger.error("Can't refresh remote token please wait... %s", e)
+                health.mark_rate_limited(str(e))
                 return False
-            except (RequestException, KeyError, AttributeError, RemoteException):
+            except (RequestException, KeyError, AttributeError, RemoteException) as e:
                 logger.exception("Can't refresh remote token, please redo otp procedure")
+                health.mark_remote_token_error(str(e))
                 return False
 
     def get_sms_otp_code(self):

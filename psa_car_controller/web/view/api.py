@@ -3,6 +3,7 @@ import logging
 from flask import jsonify, request, Response as FlaskResponse
 from pydantic import BaseModel
 
+from psa_car_controller.common import health
 from psa_car_controller.common.utils import RateLimitException
 from psa_car_controller.psacc.application.car_controller import PSACarController
 from psa_car_controller.psacc.repository.db import Database
@@ -30,6 +31,17 @@ def json_response(json: str, status=200):
         status=status,
         mimetype='application/json'
     )
+
+
+@app.route('/health/remote')
+def health_remote():
+    """Estat (només lectura) de l'autenticació/connexió remota amb PSA.
+
+    Pensat perquè un consumidor extern (p.ex. el panell de domotica) pugui
+    saber si les comandes cap al cotxe (MQTT) funcionaran de veritat, sense
+    haver de llegir logs.
+    """
+    return jsonify(health.get_state())
 
 
 @app.route('/get_vehicles')
