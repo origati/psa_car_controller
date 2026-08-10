@@ -41,6 +41,10 @@ Quan psacc es (re)connecta a MQTT, dispara `_wakeup_all_cars` amb un `Timer(2s)`
 
 El cotxe tarda **~25-30 segons** a respondre a un wakeup quan dorm. PSA pot retornar `process_code 901` (vehicle asleep) com a estat intermedi — no és un error final, el cotxe acaba responent.
 
+### Webhook cap al daemon de `domotica`
+
+`_update_car_status_from_mqtt` (`RemoteClient.py`) crida `_notify_charger_webhook()` cada cop que un event MQTT porta `rate` o `cable_detected` — fa un POST fire-and-forget (thread separat, timeout 3s, errors silenciats) a `CHARGER_WEBHOOK_URL` (env var, definida a `run_psacc.sh` com `http://127.0.0.1:8080/car/mqtt_event`). Objectiu: que el daemon de càrrega de `domotica` reaccioni a l'instant a canvis reals del cotxe (engegar/aturar càrrega, connectar/desconnectar cable) en lloc d'esperar el seu propi cicle de polling (fins a 5 min). Si `CHARGER_WEBHOOK_URL` no està definida, no fa res (opt-in). Al costat de `domotica`, l'endpoint `/car/mqtt_event` només crida `wake_daemon()` (`charger/daemon.py`) — no fa cap avaluació ell mateix, deixa que ho faci el propi thread del daemon per evitar curses.
+
 ## Reautenticació OAuth (`invalid_grant`)
 
 Si els logs (`journalctl -u psa_car_controller.service`) mostren `oauth2_client.credentials_manager.OAuthError: 400 - invalid_grant : grant is invalid` de forma repetida (cada ~10 min, a `refresh_token_now` a `oauth.py:79`), el `refresh_token` guardat a `config.json` ha quedat invalidat per PSA/Stellantis (caducitat o revocació al seu costat, no és un bug del codi). Cal refer el login manual:

@@ -3,6 +3,8 @@ import logging
 import threading
 from datetime import datetime
 from os import environ
+from urllib.error import URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 import paho.mqtt.client as mqtt
 from requests import RequestException
@@ -25,6 +27,12 @@ MQTT_SERVER = "mwa.mpsa.com"
 MQTT_RESP_TOPIC = "psa/RemoteServices/to/cid/"
 MQTT_EVENT_TOPIC = "psa/RemoteServices/events/MPHRTServices/"
 MQTT_TOKEN_TTL = 890
+
+# URL opcional que es crida (fire-and-forget) cada cop que arriba un event MQTT
+# de càrrega del cotxe, perquè un consumidor extern (p.ex. el daemon de
+# domotica) reaccioni a l'instant sense esperar el seu propi cicle de polling.
+CHARGER_WEBHOOK_URL = environ.get("CHARGER_WEBHOOK_URL")
+CHARGER_WEBHOOK_TIMEOUT = 3
 
 
 class RemoteException(Exception):
@@ -155,8 +163,24 @@ class RemoteClient:
             cable = charge_info.get('cable_detected')
             if cable is not None and electric.charging is not None:
                 electric.charging.plugged = bool(cable)
+            if rate is not None or cable is not None:
+                self._notify_charger_webhook()
         except (AttributeError, IndexError):
             pass
+
+    @staticmethod
+    def _notify_charger_webhook():
+        """Avisa un consumidor extern (fire-and-forget) que hi ha un event nou de càrrega."""
+        if not CHARGER_WEBHOOK_URL:
+            return
+
+        def _call():
+            try:
+                urlopen(UrlRequest(CHARGER_WEBHOOK_URL, method="POST"), timeout=CHARGER_WEBHOOK_TIMEOUT)
+            except (URLError, OSError):
+                logger.debug("_notify_charger_webhook: no s'ha pogut avisar %s", CHARGER_WEBHOOK_URL, exc_info=True)
+
+        threading.Thread(target=_call, daemon=True).start()
 
     def start(self):
         if self.load_otp():
