@@ -34,6 +34,12 @@ MQTT_TOKEN_TTL = 890
 CHARGER_WEBHOOK_URL = environ.get("CHARGER_WEBHOOK_URL")
 CHARGER_WEBHOOK_TIMEOUT = 3
 
+# El camp `rate` dels events MQTT de càrrega és sorollós: s'han observat mostres
+# rate=0 puntuals enmig d'una sessió de càrrega real (rate=3 confirmat entre
+# desenes de rate=0). Un sol rate=0 no és prova fiable d'aturada, així que no
+# marquem "Stopped" fins que fa DEBOUNCE_STOP_SECONDS que no veiem cap rate > 0.
+DEBOUNCE_STOP_SECONDS = 30
+
 
 class RemoteException(Exception):
     pass
@@ -47,6 +53,7 @@ class RemoteClient:
         self.remoteCredentials: RemoteCredentials = remoteCredentials
         self.manager = manager
         self.precond_programs = {}
+        self._last_positive_rate_at = {}
         self.account_info = account_info
         self.headers = {
             "x-introspect-realm": self.account_info.realm,
@@ -149,16 +156,21 @@ class RemoteClient:
             if autonomy is not None:
                 electric.autonomy = autonomy
             record_battery_csv(vin, "mqtt", level_bms=soc_batt, autonomy=autonomy)
-            # Actualitzam l'estat de càrrega en memòria basant-nos en el rate MQTT (fiable).
+            # Actualitzam l'estat de càrrega en memòria basant-nos en el rate MQTT (fiable
+            # amb debounce — veure DEBOUNCE_STOP_SECONDS més amunt).
             # rate > 0  → InProgress immediatament, sense esperar la REST API.
-            # rate = 0  → si teníem InProgress, posam Stopped perquè _sync_from_api de
-            #             domotica detecti el canvi en ≤60s sense esperar el refresc REST (4h).
+            # rate = 0  → si teníem InProgress, posam Stopped només si fa
+            #             DEBOUNCE_STOP_SECONDS que no veiem cap rate > 0.
             rate = charge_info.get('rate')
             if rate is not None and electric.charging is not None:
+                now = datetime.now()
                 if rate > 0:
                     electric.charging.status = "InProgress"
+                    self._last_positive_rate_at[vin] = now
                 elif electric.charging.status == "InProgress":
-                    electric.charging.status = "Stopped"
+                    last_positive = self._last_positive_rate_at.get(vin)
+                    if last_positive is None or (now - last_positive).total_seconds() >= DEBOUNCE_STOP_SECONDS:
+                        electric.charging.status = "Stopped"
             # cable_detected MQTT també és fiable → actualitzam plugged a l'instant.
             cable = charge_info.get('cable_detected')
             if cable is not None and electric.charging is not None:

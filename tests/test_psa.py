@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 from psa_car_controller.psa.connected_car_api import Vehicles, ApiClient
@@ -51,9 +52,15 @@ class TestUnit(unittest.TestCase):
         self.assertEqual(electric.charging.status, "InProgress")
         self.assertTrue(electric.charging.plugged)
         self.assertEqual(electric.autonomy, 150)
-        # WHEN rate = 0 després d'estar carregant
+        # WHEN rate = 0 just després d'estar carregant (mostra puntual, sorollosa)
         remote_client._update_car_status_from_mqtt(vin, {'rate': 0, 'cable_detected': 0})
-        # THEN detecta el final de la càrrega
+        # THEN NO es marca aturada a l'instant (debounce): rate=0 sol no és fiable
+        self.assertEqual(electric.charging.status, "InProgress")
+        self.assertFalse(electric.charging.plugged)
+        # WHEN fa més de DEBOUNCE_STOP_SECONDS que no veiem cap rate > 0
+        remote_client._last_positive_rate_at[vin] = datetime.now() - timedelta(seconds=40)
+        remote_client._update_car_status_from_mqtt(vin, {'rate': 0, 'cable_detected': 0})
+        # THEN ara sí que detecta el final de la càrrega
         self.assertEqual(electric.charging.status, "Stopped")
         self.assertFalse(electric.charging.plugged)
 
