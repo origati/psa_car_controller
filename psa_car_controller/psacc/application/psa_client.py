@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from json import JSONEncoder
 from hashlib import md5
@@ -117,12 +118,23 @@ class PSAClient:
             car.status = res
         return res
 
+    @staticmethod
+    def _seconds_until_aligned(interval: float) -> float:
+        """Segons fins al proper múltiple de `interval` s des de l'època Unix.
+
+        Fa que el refresc automàtic (-R) caigui sempre a segon 0 d'un minut,
+        en lloc d'anar a la deriva des de quan s'ha arrencat el servei.
+        """
+        now = time.time()
+        return interval - (now % interval)
+
     def __refresh_vehicle_info(self):
         if self.info_refresh_rate is not None:
             if self.refresh_thread and self.refresh_thread.is_alive():
                 logger.debug("refresh_vehicle_info: precedent task still alive")
                 self.refresh_thread.cancel()
-            self.refresh_thread = threading.Timer(self.info_refresh_rate, self.__refresh_vehicle_info)
+            delay = self._seconds_until_aligned(self.info_refresh_rate)
+            self.refresh_thread = threading.Timer(delay, self.__refresh_vehicle_info)
             self.refresh_thread.daemon = True
             self.refresh_thread.start()
             try:

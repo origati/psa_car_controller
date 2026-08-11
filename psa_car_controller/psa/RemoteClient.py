@@ -34,12 +34,6 @@ MQTT_TOKEN_TTL = 890
 CHARGER_WEBHOOK_URL = environ.get("CHARGER_WEBHOOK_URL")
 CHARGER_WEBHOOK_TIMEOUT = 3
 
-# El camp `rate` dels events MQTT de càrrega és sorollós: s'han observat mostres
-# rate=0 puntuals enmig d'una sessió de càrrega real (rate=3 confirmat entre
-# desenes de rate=0). Un sol rate=0 no és prova fiable d'aturada, així que no
-# marquem "Stopped" fins que fa DEBOUNCE_STOP_SECONDS que no veiem cap rate > 0.
-DEBOUNCE_STOP_SECONDS = 30
-
 
 class RemoteException(Exception):
     pass
@@ -53,7 +47,6 @@ class RemoteClient:
         self.remoteCredentials: RemoteCredentials = remoteCredentials
         self.manager = manager
         self.precond_programs = {}
-        self._last_positive_rate_at = {}
         self.account_info = account_info
         self.headers = {
             "x-introspect-realm": self.account_info.realm,
@@ -156,25 +149,23 @@ class RemoteClient:
             if autonomy is not None:
                 electric.autonomy = autonomy
             record_battery_csv(vin, "mqtt", level_bms=soc_batt, autonomy=autonomy)
-            # Actualitzam l'estat de càrrega en memòria basant-nos en el rate MQTT (fiable
-            # amb debounce — veure DEBOUNCE_STOP_SECONDS més amunt).
-            # rate > 0  → InProgress immediatament, sense esperar la REST API.
-            # rate = 0  → si teníem InProgress, posam Stopped només si fa
-            #             DEBOUNCE_STOP_SECONDS que no veiem cap rate > 0.
+            # Actualitzam l'estat de càrrega en memòria basant-nos en el rate MQTT.
+            # NOMÉS l'usam per pujar a InProgress (rate > 0 és un senyal positiu real).
+            # NO l'usam per baixar a Stopped: empíricament, amb aquest cotxe/wallbox
+            # (EasyWallbox AC, sense OCPP) rate=0 és el valor MÉS FREQÜENT fins i tot
+            # enmig d'una càrrega real en curs (26 de 33 mostres en 2h de càrrega
+            # real ininterrompuda eren rate=0). Cap debounce raonable ho arregla
+            # perquè pot estar minuts sencers a 0. L'aturada real la confirma el
+            # refresc REST periòdic (veure `_IDLE_REFRESH_INTERVAL` a domotica).
             rate = charge_info.get('rate')
-            if rate is not None and electric.charging is not None:
-                now = datetime.now()
-                if rate > 0:
-                    electric.charging.status = "InProgress"
-                    self._last_positive_rate_at[vin] = now
-                elif electric.charging.status == "InProgress":
-                    last_positive = self._last_positive_rate_at.get(vin)
-                    if last_positive is None or (now - last_positive).total_seconds() >= DEBOUNCE_STOP_SECONDS:
-                        electric.charging.status = "Stopped"
-            # cable_detected MQTT també és fiable → actualitzam plugged a l'instant.
+            if rate is not None and electric.charging is not None and rate > 0:
+                electric.charging.status = "InProgress"
+            # cable_detected pateix el mateix problema: 0 de 33 mostres van ser 1
+            # durant les mateixes 2h de càrrega real amb el cable posat. Tampoc el
+            # fem servir per marcar "no endollat", només per confirmar que sí ho està.
             cable = charge_info.get('cable_detected')
-            if cable is not None and electric.charging is not None:
-                electric.charging.plugged = bool(cable)
+            if cable and electric.charging is not None:
+                electric.charging.plugged = True
             if rate is not None or cable is not None:
                 self._notify_charger_webhook()
         except (AttributeError, IndexError):

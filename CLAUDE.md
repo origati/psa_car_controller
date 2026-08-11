@@ -31,7 +31,7 @@ El cache local és buit/obsolet després de cada reinici de psacc fins que arrib
   - `psa/RemoteServices/events/MPHRTServices/<vin>` — events push del cotxe (càrrega, posició…)
   - `psa/RemoteServices/to/cid/<cid>/#` — respostes a comandes enviades
 - **Events de càrrega** (`charging_state`): camp `rate` (W), `cable_detected` (0/1), `soc_batt` (%), `autonomy_zev` (km)
-- **De l'MQTT ens fiam de**: carrega sí/no (`rate`) i endollat sí/no (`cable_detected`). **NO** del nivell de bateria (`soc_batt`): escala BMS diferent i pot enviar valors brossa al wakeup.
+- **De l'MQTT NOMÉS ens fiam de la transició positiva**: `rate > 0` → càrrega en curs, `cable_detected == 1` → endollat. **NO** ens fiem de `rate == 0` ni `cable_detected == 0` com a prova d'aturada/desendollada: mesurat empíricament amb l'Opel Combo-e (EasyWallbox AC, sense OCPP) durant 2h de càrrega real ininterrompuda, `rate` va ser 0 en 26 de 33 mostres i `cable_detected` va ser 0 en **33 de 33** — és a dir, aquest camp mai reflecteix "endollat" durant una càrrega real amb aquest wallbox. Cap debounce raonable ho arregla (poden passar minuts sencers a 0). L'aturada/desendollada real només la confirma el refresc REST periòdic (`_IDLE_REFRESH_INTERVAL`/`_CHARGING_REFRESH_INTERVAL` a domotica `charger_controller.py`). Tampoc ens fiem del nivell de bateria (`soc_batt`): escala BMS diferent de `level` i pot enviar valors brossa al wakeup.
 
 ### Wakeup a `__on_mqtt_connect` (`RemoteClient.py`)
 
@@ -68,6 +68,10 @@ Events MQTT sense `precond_state` causaven excepció. Fix: `data.get("precond_st
 ### Bucle infinit de wakeups per sentinel `0xFFE` (`RemoteClient.py`)
 PSA usa `remaining_time=4094` (0xFFE) com a sentinel "valor desconegut". El codi el tractava com a temps real → disparava wakeup → nou event MQTT → bucle infinit cada 60s fins desconnexió.
 Fix: `REMAINING_TIME_UNKNOWN = 0xFFE` exclòs a la condició de `_fix_not_updated_api`.
+
+### Falses aturades per `rate`/`cable_detected` sorollosos (`RemoteClient.py::_update_car_status_from_mqtt`)
+El codi marcava `status = "Stopped"` i `plugged = False` amb una sola mostra MQTT de `rate == 0` / `cable_detected == 0`, assumint que eren senyals fiables. En producció (Combo-e + EasyWallbox AC) això disparava aturades falses en ple mig d'una càrrega real (domotica detectava "canvi extern: charging True → False" i tornava a enviar `iniciar_carga()`, amb soroll de log i risc de deixar la càrrega pausada fins al proper refresc REST si en aquell moment `should_start` no es complia). Un primer intent amb debounce de 30s no va ser suficient perquè `rate` pot estar minuts sencers a 0 durant càrrega real.
+Fix: eliminat l'ús de `rate == 0` / `cable_detected == 0` per baixar l'estat. Ara només pugen l'estat (`rate > 0` → `InProgress`, `cable_detected == 1` → `plugged = True`); la baixada només la confirma el refresc REST periòdic.
 
 ## Fitxers clau
 
