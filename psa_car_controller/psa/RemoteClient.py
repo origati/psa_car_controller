@@ -3,6 +3,7 @@ import logging
 import threading
 from datetime import datetime
 from os import environ
+from typing import Optional
 from urllib.error import URLError
 from urllib.request import Request as UrlRequest, urlopen
 
@@ -58,6 +59,7 @@ class RemoteClient:
         self.otp = None
         self._lock = threading.Lock()
         self.update_thread: threading.Timer = None
+        self.remote_token_last_update: Optional[datetime] = None
 
     def __on_mqtt_connect(self, client, userdata, _flags, result_code):  # pylint: disable=unused-argument
         logger.info("Connected with result code %s", result_code)
@@ -243,9 +245,15 @@ class RemoteClient:
     def _refresh_remote_token(self, force=False):
         with self._lock:
             bad_remote_token = self.remoteCredentials.refresh_token is None
-            if not force and not bad_remote_token and self.remoteCredentials.last_update:
-                last_update: datetime = self.remoteCredentials.last_update
-                if (datetime.now() - last_update).total_seconds() < MQTT_TOKEN_TTL:
+            # NOTA: usam `remote_token_last_update` (marcat a CADA refresc reeixit),
+            # no `remoteCredentials.last_update` (només es mou quan PSA retorna un
+            # refresh_token NOU, cosa que normalment no fa — només retorna
+            # access_token). Amb `remoteCredentials.last_update` aquest check mai
+            # es complia i cada ordre disparava un `refresh_token_now()` nou,
+            # esgotant el rate limit de PSA (6 cada 30 min) amb qualsevol ràfega
+            # d'ordres normal.
+            if not force and not bad_remote_token and self.remote_token_last_update:
+                if (datetime.now() - self.remote_token_last_update).total_seconds() < MQTT_TOKEN_TTL:
                     return True
             try:
                 self.manager.refresh_token_now()
