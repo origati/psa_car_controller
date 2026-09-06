@@ -115,7 +115,12 @@ class PSAClient:
                         return res
                 except (ApiException, HTTPError) as ex:
                     logger.error("get_vehicle_info: ApiException: %s", ex, exc_info_debug=True)
-            car.status = res
+            # Una lectura fallida (503 típic quan el cotxe dorm) NO ha d'esborrar
+            # el darrer estat bo: si ho féssim, `?from_cache=1` peta amb un 500 i
+            # els events MQTT deixen d'actualitzar res (`_update_car_status_from_mqtt`
+            # surt d'hora si `car.status is None`) fins a la propera lectura OK.
+            if res is not None:
+                car.status = res
         return res
 
     @staticmethod

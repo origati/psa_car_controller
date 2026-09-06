@@ -13,9 +13,9 @@
 
 - Ruta: `/home/origati/Develop/Domotica/psa_car_controller/`
 - Servei systemd: `/etc/systemd/system/psa_car_controller.service`
-- Script d'arrencada: `run_psacc.sh` → `python3 -u -m psa_car_controller -r -R 240`
+- Script d'arrencada: `run_psacc.sh` → `python3 -u -m psa_car_controller -r`
   - `-r` = guarda dades a BD
-  - `-R 240` = refresc automàtic cada 4h (recomanació upstream: mínim 60 min per evitar `RateLimitException`)
+  - **NO** hi ha `-R` (refresc automàtic): es va treure (`8a54eb7 llevar autoupdate`) perquè `domotica` va agafar el control total del refresc de bateria. Sense `-R` ni `-c`, `start_refresh_thread()` no es crida mai i `__refresh_vehicle_info` (i el fix `_seconds_until_aligned`) queden inerts. Qui refresca l'estat del cotxe és `domotica` (`charger_controller.py::_wakeup_then_refresh`, cada hora: wakeup + espera ~40s + lectura sense cache). psacc només serveix cache local (MQTT) + la REST quan li demanen.
 - Servidor: escolta només a `127.0.0.1:5000` dins la Pi (no exposat a la xarxa). Per accedir-hi de fora: `ssh -f -N -L 5001:127.0.0.1:5000 origati@100.119.150.78` i obrir `http://127.0.0.1:5001` al navegador local.
 
 ## Arquitectura de cache (dos nivells)
@@ -67,7 +67,10 @@ Events MQTT sense `precond_state` causaven excepció. Fix: `data.get("precond_st
 
 ### Bucle infinit de wakeups per sentinel `0xFFE` (`RemoteClient.py`)
 PSA usa `remaining_time=4094` (0xFFE) com a sentinel "valor desconegut". El codi el tractava com a temps real → disparava wakeup → nou event MQTT → bucle infinit cada 60s fins desconnexió.
-Fix: `REMAINING_TIME_UNKNOWN = 0xFFE` exclòs a la condició de `_fix_not_updated_api`.
+Fix original: `REMAINING_TIME_UNKNOWN = 0xFFE` exclòs a la condició de `_fix_not_updated_api`. (NOTA: `_fix_not_updated_api` i tota la lògica de wakeup-des-de-MQTT es va perdre en un merge amb upstream; `RemoteClient.py` actual ja no dispara wakeups per events, així que el bucle no pot tornar per aquesta via.)
+
+### Lectura REST fallida esborrava el cache (`psacc/application/psa_client.py::get_vehicle_info`)
+Amb `car.status = res` al final del bucle, un `res is None` (503 típic de PSA quan el cotxe dorm) deixava `car.status = None`. Conseqüències mentre estava a `None`: `/get_vehicleinfo?from_cache=1` → `None.to_dict()` → HTTP 500, i els events MQTT deixaven d'actualitzar res (`_update_car_status_from_mqtt` surt d'hora si `car.status is None`) fins a la propera lectura OK. Fix: `if res is not None: car.status = res` (mantenir el darrer estat bo). A `web/view/api.py`, `/get_vehicleinfo` també cau a `car.status` i torna un `502` JSON en lloc d'un stacktrace quan no hi ha res.
 
 ### Falses aturades per `rate`/`cable_detected` sorollosos (`RemoteClient.py::_update_car_status_from_mqtt`)
 El codi marcava `status = "Stopped"` i `plugged = False` amb una sola mostra MQTT de `rate == 0` / `cable_detected == 0`, assumint que eren senyals fiables. En producció (Combo-e + EasyWallbox AC) això disparava aturades falses en ple mig d'una càrrega real (domotica detectava "canvi extern: charging True → False" i tornava a enviar `iniciar_carga()`, amb soroll de log i risc de deixar la càrrega pausada fins al proper refresc REST si en aquell moment `should_start` no es complia). Un primer intent amb debounce de 30s no va ser suficient perquè `rate` pot estar minuts sencers a 0 durant càrrega real.

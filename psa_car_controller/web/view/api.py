@@ -57,8 +57,16 @@ def get_vehicules():
 @app.route('/get_vehicleinfo/<string:vin>')
 def get_vehicle_info(vin):
     from_cache = int(request.args.get('from_cache', 0)) == 1
+    vehicle_info = APP.myp.get_vehicle_info(vin, from_cache)
+    if vehicle_info is None:
+        # La crida sense cache ha fallat (PSA 503 / cotxe adormit) i no tenim
+        # cap estat previ. Millor un error JSON explícit que un stacktrace 500.
+        car = APP.myp.vehicles_list.get_car_by_vin(vin)
+        vehicle_info = car.status if car is not None else None
+    if vehicle_info is None:
+        return json_response(json.dumps({"error": "vehicle info not available"}), status=502)
     response = app.response_class(
-        response=json.dumps(APP.myp.get_vehicle_info(vin, from_cache).to_dict(), default=str),
+        response=json.dumps(vehicle_info.to_dict(), default=str),
         status=200,
         mimetype='application/json'
     )
