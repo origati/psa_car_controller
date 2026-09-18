@@ -151,7 +151,7 @@ cars.json
 certs/
 *.log.*
 
-.vscode/ 
+.vscode/
 
 myopel.apk.bz2
 mypeugeot.apk.bz2
@@ -162,5 +162,6 @@ battery_readings.csv
 test_charge_control.json
 tests/data/otp_test2.bin
 tests/data/test_car.json
-
-
+tests/mypeugeot.apk
+tests/mypeugeot.apk.bz2
+tests/test_charge_control.json

@@ -7,7 +7,7 @@ from typing import Tuple
 from http import HTTPStatus
 from typing import Optional
 
-from oauth2_client.credentials_manager import CredentialManager, ServiceInformation
+from oauth2_client.credentials_manager import CredentialManager, OAuthError, ServiceInformation
 from requests import Response, RequestException
 
 from psa_car_controller.common import health
@@ -82,8 +82,10 @@ class OpenIdCredentialManager(CredentialManager):
                 refresh_callback()
             health.mark_oauth_ok()
             return True
+        except OAuthError as e:
+            logger.error("Can't refresh token: %s", e)
         except RequestException as e:
-            logger.error("Can't refresh token %s", e)
+            logger.error("Can't refresh token: %s", e)
             health.mark_oauth_error(str(e))
         except Exception as e:
             health.mark_oauth_error(str(e))
@@ -114,7 +116,7 @@ class OauthAPIClient(ApiClient):
                  _return_http_data_only=None, collection_formats=None,
                  _preload_content=True, _request_timeout=None):
         _request_timeout = _request_timeout or TIMEOUT_IN_S
-        for _ in range(0, 2):
+        for attempt in range(0, 2):
             try:
                 if not async_req:
                     return self._ApiClient__call_api(resource_path, method,
@@ -132,8 +134,6 @@ class OauthAPIClient(ApiClient):
                                                                collection_formats,
                                                                _preload_content, _request_timeout))
             except ApiException as e:
-                if e.reason == 'Unauthorized':
-                    self.configuration.refresh_callback()
-                else:
+                if attempt == 1 or e.reason != 'Unauthorized' or not self.configuration.refresh_callback():
                     raise e
         raise ApiException(status=503, reason="API call failed after retries")

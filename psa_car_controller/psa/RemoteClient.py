@@ -231,18 +231,21 @@ class RemoteClient:
         self.publish(msg)
         return msg
 
-    def publish(self, mqtt_request: MQTTRequest, store=True):
-        self._refresh_remote_token()
+    def publish(self, mqtt_request: MQTTRequest, store=True) -> bool:
+        if not self._refresh_remote_token():
+            logger.error("Can't publish %s: remote token refresh failed", mqtt_request.topic)
+            return False
         message = mqtt_request.get_message_to_json(self.remoteCredentials.access_token)
         logger.debug("mqtt publish: %s %s", mqtt_request.topic, message)
         self.mqtt_client.publish(mqtt_request.topic, message)
         if store:
             self.last_request = mqtt_request
+        return True
 
     def mqtt_request(self, vin, req_parameters, topic):
         return MQTTRequest(topic, vin, req_parameters, self.account_info.get_mqtt_customer_id())
 
-    def _refresh_remote_token(self, force=False):
+    def _refresh_remote_token(self, force=False) -> bool:
         with self._lock:
             bad_remote_token = self.remoteCredentials.refresh_token is None
             # NOTA: usam `remote_token_last_update` (marcat a CADA refresc reeixit),
@@ -256,7 +259,9 @@ class RemoteClient:
                 if (datetime.now() - self.remote_token_last_update).total_seconds() < MQTT_TOKEN_TTL:
                     return True
             try:
-                self.manager.refresh_token_now()
+                if not self.manager.refresh_token_now():
+                    logger.error("Can't refresh remote token: access token refresh failed")
+                    return False
                 if bad_remote_token:
                     logger.warning("remote_refresh_token isn't defined")
                 else:
