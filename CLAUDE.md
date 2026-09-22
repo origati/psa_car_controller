@@ -43,7 +43,9 @@ El cotxe tarda **~25-30 segons** a respondre a un wakeup quan dorm. PSA pot reto
 
 ### Webhook cap al daemon de `domotica`
 
-`_update_car_status_from_mqtt` (`RemoteClient.py`) crida `_notify_charger_webhook()` cada cop que un event MQTT porta `rate` o `cable_detected` — fa un POST fire-and-forget (thread separat, timeout 3s, errors silenciats) a `CHARGER_WEBHOOK_URL` (env var, definida a `run_psacc.sh` com `http://127.0.0.1:8080/car/mqtt_event`). Objectiu: que el daemon de càrrega de `domotica` reaccioni a l'instant a canvis reals del cotxe (engegar/aturar càrrega, connectar/desconnectar cable) en lloc d'esperar el seu propi cicle de polling (fins a 5 min). Si `CHARGER_WEBHOOK_URL` no està definida, no fa res (opt-in). Al costat de `domotica`, l'endpoint `/car/mqtt_event` només crida `wake_daemon()` (`charger/daemon.py`) — no fa cap avaluació ell mateix, deixa que ho faci el propi thread del daemon per evitar curses.
+`_update_car_status_from_mqtt` (`RemoteClient.py`) crida `_notify_charger_webhook()` cada cop que un event MQTT porta `rate` o `cable_detected` — fa un POST fire-and-forget (thread separat, timeout 3s, errors silenciats) a `CHARGER_WEBHOOK_URL` (env var, definida a `run_psacc.sh` com `http://127.0.0.1:8080/car/mqtt_event`). Si `CHARGER_WEBHOOK_URL` no està definida, no fa res (opt-in).
+
+**NOTA (22/09/2026):** abans, l'endpoint `/car/mqtt_event` de `domotica` cridava `wake_daemon()` per forçar una avaluació immediata (engegar/aturar) en lloc d'esperar el cicle de polling — es va treure després d'una avaria real del sistema de tracció, quan un `status` de PSA inestable va provocar events MQTT en ràfega i, per tant, ordres start/stop reals cada pocs segons (23 ordres en 2h enfront de l'ús normal d'1-2/dia). Ara aquest endpoint no fa res més que respondre `200 OK`: la decisió d'engegar/aturar només es pren a l'interval programat del daemon (`charger/daemon.py::_wait_for_next_run` a `domotica`), mai reactivament a un event MQTT. El cache de psacc ja queda actualitzat pel seu propi listener, així que el proper cicle programat llegeix la info fresca igualment.
 
 ## Reautenticació OAuth (`invalid_grant`)
 
