@@ -162,12 +162,12 @@ class RemoteClient:
             rate = charge_info.get('rate')
             if rate is not None and electric.charging is not None and rate > 0:
                 electric.charging.status = "InProgress"
-            # cable_detected pateix el mateix problema: 0 de 33 mostres van ser 1
-            # durant les mateixes 2h de càrrega real amb el cable posat. Tampoc el
-            # fem servir per marcar "no endollat", només per confirmar que sí ho està.
+            # cable_detected NO és fiable en cap direcció amb aquest cotxe: 0 en
+            # 33 de 33 mostres durant 2h de càrrega real amb el cable posat, i 1 en
+            # tots els events d'un wakeup amb el cotxe desendollat al carrer
+            # (2026-10-03). No el fem servir per tocar `plugged`: aquest només
+            # ve de la REST de PSA.
             cable = charge_info.get('cable_detected')
-            if cable and electric.charging is not None:
-                electric.charging.plugged = True
             if rate is not None or cable is not None:
                 self._notify_charger_webhook()
         except (AttributeError, IndexError):
