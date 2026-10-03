@@ -81,6 +81,14 @@ Fix: eliminat l'ús de `rate == 0` / `cable_detected == 0` per baixar l'estat. A
 ### `cable_detected == 1` marcava endollat un cotxe desendollat (2026-10-03)
 Prova amb el cotxe desendollat al carrer (`charge_now` per veure la resposta): tots els events del wakeup portaven `cable_detected: 1` → psacc posava `plugged = True` a la cache mentre la REST deia `Disconnected`. Juntament amb els 33/33 a 0 carregant de debò, el camp no és fiable en cap direcció amb aquest cotxe. Fix: `cable_detected` ja no toca `plugged`. Mateixa prova: la resposta a una ordre (`return_code`) tampoc diu res del cable — `charge_now` amb el cotxe desendollat torna `0` ("OK") sense fer res.
 
+## Merges amb upstream (flobz/psa_car_controller)
+
+Decisions a mantenir en cada merge (darrer: 2026-10-03, 8 commits — model 508 SW II Hybrid, E-5008 73kWh, estat del tancament de portes per MQTT, refresc del token amb reintents i en desconnexió rc 7):
+- **No recuperar `_fix_not_updated_api`** (`RemoteClient.py`): upstream la conserva, però dispara `sleep(60)` + wakeup per cada event amb `remaining_time != 0` → bucle infinit amb el sentinel `4094` (veure "Bucle infinit de wakeups" més avall).
+- **TTL del token remot des de `remote_token_last_update`**, no des de `remoteCredentials.last_update` (veure el comentari a `_refresh_remote_token`). Upstream ja usa `remote_token_last_update` per limitar els refrescos forçats, però no per al TTL normal; el seu test `test_unforced_refresh_respects_ttl` està adaptat a la nostra semàntica.
+- `refresh_token_now` (`oauth.py`): reintents amb backoff d'upstream + marques de salut nostres (`health.mark_oauth_ok/error`).
+- `_on_mqtt_disconnect`: `health.mark_mqtt_disconnect` nostre + refresc forçat (amb límit) en rc 1 i 7 d'upstream; rc 4/5 refresc normal.
+
 ## Fitxers clau
 
 | Fitxer | Funció |

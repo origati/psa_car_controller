@@ -2,6 +2,7 @@ import logging
 import hashlib
 import secrets
 import base64
+import time
 from typing import Tuple
 
 from http import HTTPStatus
@@ -76,20 +77,34 @@ class OpenIdCredentialManager(CredentialManager):
 
     @rate_limit(6, 1800)
     def refresh_token_now(self):
-        try:
-            self._refresh_token()
-            for refresh_callback in self.refresh_callbacks:
-                refresh_callback()
-            health.mark_oauth_ok()
-            return True
-        except OAuthError as e:
-            logger.error("Can't refresh token: %s", e)
-        except RequestException as e:
-            logger.error("Can't refresh token: %s", e)
-            health.mark_oauth_error(str(e))
-        except Exception as e:
-            health.mark_oauth_error(str(e))
-            raise
+        # The PSA token endpoint sometimes drops the connection without a
+        # response (RemoteDisconnected), leaving the caller with a stale
+        # token that then fails every API call with 401 until the next
+        # successful refresh. Retry a few times with backoff before giving up.
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self._refresh_token()
+                logger.info("access token refreshed")
+                for refresh_callback in self.refresh_callbacks:
+                    refresh_callback()
+                health.mark_oauth_ok()
+                return True
+            except OAuthError as e:
+                logger.error("Can't refresh token: %s", e)
+                break
+            except RequestException as e:
+                if attempt < max_attempts:
+                    delay = 2 ** attempt
+                    logger.warning("Can't refresh token: %s - retrying in %ss (attempt %d/%d)",
+                                   e, delay, attempt, max_attempts)
+                    time.sleep(delay)
+                else:
+                    logger.error("Can't refresh token: %s", e)
+                    health.mark_oauth_error(str(e))
+            except Exception as e:
+                health.mark_oauth_error(str(e))
+                raise
         return False
 
     def request(self, method, url, **kwargs):  # pylint: disable=W0221

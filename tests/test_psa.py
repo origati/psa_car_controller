@@ -1,8 +1,9 @@
 from unittest.mock import MagicMock, patch
 
 from psa_car_controller.psa.connected_car_api import Vehicles, ApiClient
+from psa_car_controller.psa.connected_car_api.models.doors_state import DoorsState
 from psa_car_controller.psa.constants import DISCONNECTED
-from psa_car_controller.psacc.model.car import Car
+from psa_car_controller.psacc.model.car import Car, Cars
 from tests.data.car_status import ELECTRIC_CAR_STATUS
 
 import unittest
@@ -47,18 +48,22 @@ class TestUnit(unittest.TestCase):
         # WHEN rate > 0 i cable connectat
         remote_client._update_car_status_from_mqtt(
             vin, {'rate': 20, 'cable_detected': 1, 'autonomy_zev': 150})
-        # THEN estat, plugged i autonomia actualitzats a l'instant
+        # THEN estat i autonomia actualitzats a l'instant; plugged NO (cable_detected
+        # no és fiable en cap direcció amb aquest cotxe: només el toca la REST)
         self.assertEqual(electric.charging.status, "InProgress")
-        self.assertTrue(electric.charging.plugged)
+        self.assertFalse(electric.charging.plugged)
         self.assertEqual(electric.autonomy, 150)
         # WHEN rate = 0 i cable_detected = 0 després d'estar carregant
         remote_client._update_car_status_from_mqtt(vin, {'rate': 0, 'cable_detected': 0})
-        # THEN NO es marca aturada ni desendollat: cap dels dos camps és fiable
-        # per a la transició negativa amb aquest vehicle/wallbox (rate=0 i
-        # cable_detected=0 apareixen sovint enmig d'una càrrega real). Només
-        # el refresc REST periòdic pot confirmar una aturada real.
+        # THEN NO es marca aturada: rate=0 apareix sovint enmig d'una càrrega
+        # real. Només el refresc REST periòdic pot confirmar una aturada real.
         self.assertEqual(electric.charging.status, "InProgress")
-        self.assertTrue(electric.charging.plugged)
+        self.assertFalse(electric.charging.plugged)
+        # WHEN cable_detected = 1 amb el cotxe desendollat (observat 2026-10-03)
+        electric.charging.status = DISCONNECTED
+        remote_client._update_car_status_from_mqtt(vin, {'rate': 0, 'cable_detected': 1})
+        # THEN segueix desendollat
+        self.assertFalse(electric.charging.plugged)
 
     def test_message_without_precond(self):
         remote_client = get_rc()
@@ -72,3 +77,59 @@ class TestUnit(unittest.TestCase):
         msg = MQTTMessage(topic=MQTT_EVENT_TOPIC.encode("utf-8"))
         msg.payload = message_without_charge_info
         remote_client._on_mqtt_message(None, None, msg)
+
+
+LOCK_EVENT = '{"date":"2026-08-30T22:35:44Z","precond_state":{},"charging_state":{"remaining_time":0,"rate":0},' \
+             '"vin":"VXKUKZKW0SW011711",' \
+             '"doors_state":{"doors_opening_state":[0,0,0,0,0,0,0],"doors_locking_state":%s}}'
+
+
+class TestMqttLockState(unittest.TestCase):
+    VIN = "VXKUKZKW0SW011711"
+
+    def setUp(self):
+        self.remote_client = get_rc()
+        self.car = Car(self.VIN, "vehicle_id", "Opel")
+        self.car.status = ApiClient()._ApiClient__deserialize(ELECTRIC_CAR_STATUS, "Status")
+        self.remote_client.vehicles_list = Cars([self.car])
+
+    def _send_event(self, locking_state):
+        msg = MQTTMessage(topic=(MQTT_EVENT_TOPIC + self.VIN).encode("utf-8"))
+        msg.payload = (LOCK_EVENT % locking_state).encode("utf-8")
+        self.remote_client._on_mqtt_message(None, None, msg)
+
+    def test_locked(self):
+        self._send_event(1)
+        self.assertEqual("Locked", self.remote_client.lock_state[self.VIN])
+        self.assertEqual(["Locked"], self.car.status.doors_state.locked_state)
+
+    def test_unlocked(self):
+        self._send_event(3)
+        self.assertEqual("Unlocked", self.remote_client.lock_state[self.VIN])
+        self.assertEqual(["Unlocked"], self.car.status.doors_state.locked_state)
+
+    def test_unknown_value_is_not_guessed(self):
+        self._send_event(2)
+        self.assertNotIn(self.VIN, self.remote_client.lock_state)
+        self.assertIsNone(self.car.status.doors_state)
+
+    def test_null_doors_state(self):
+        # the key can be present and null, which must not raise out of the mqtt callback
+        msg = MQTTMessage(topic=(MQTT_EVENT_TOPIC + self.VIN).encode("utf-8"))
+        msg.payload = b'{"precond_state":{},"charging_state":{"remaining_time":0,"rate":0},' \
+                      b'"doors_state":null,"vin":"%s"}' % self.VIN.encode("utf-8")
+        self.remote_client._on_mqtt_message(None, None, msg)
+        self.assertEqual({}, self.remote_client.lock_state)
+
+    def test_event_without_doors_state(self):
+        msg = MQTTMessage(topic=(MQTT_EVENT_TOPIC + self.VIN).encode("utf-8"))
+        msg.payload = b'{"precond_state":{},"charging_state":{"remaining_time":0,"rate":0},"vin":"%s"}' \
+                      % self.VIN.encode("utf-8")
+        self.remote_client._on_mqtt_message(None, None, msg)
+        self.assertEqual({}, self.remote_client.lock_state)
+
+    def test_mqtt_overwrites_api_value(self):
+        # mqtt is live, the rest api lags behind it, so mqtt wins on conflict
+        self.car.status.doors_state = DoorsState(locked_state=["Locked"])
+        self._send_event(3)
+        self.assertEqual(["Unlocked"], self.car.status.doors_state.locked_state)
